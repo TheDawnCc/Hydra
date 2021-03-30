@@ -8,7 +8,12 @@ namespace BulletPlayer.Kits
 {
     public static class MyConverter
     {
-        public static byte[] IntToBytes(int input)
+        public static byte[] IntToBytes(int input) 
+        {
+            return BitConverter.GetBytes(input).Reverse().ToArray();
+        }
+
+        public static byte[] UshortToBytes(ushort input)
         {
             return BitConverter.GetBytes(input).Reverse().ToArray();
         }

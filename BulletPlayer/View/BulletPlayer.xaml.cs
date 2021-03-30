@@ -12,7 +12,7 @@ namespace BulletPlayer.View
         {
             InitializeComponent();
 
-            var test = new BulletScreenViewModel("22687755");
+            var test = new BulletScreenViewModel("675014");
         }
     }
 }

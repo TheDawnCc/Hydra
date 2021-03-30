@@ -26,11 +26,15 @@ namespace BulletPlayer.Kits
 
         private string token;
 
+        private int heartInterval = 25 * 1000;
+
         private Uri bulletWsUri;
 
         private ClientWebSocket _clientWebSocket = new ClientWebSocket();
 
         private CancellationTokenSource _cts = new CancellationTokenSource();
+
+        private byte[] bufferBytes = new byte[8192 * 1024];
 
         public BiliBulletWebSock(string roomId)
         {
@@ -45,7 +49,7 @@ namespace BulletPlayer.Kits
 
             token = json.data.token;
 
-            bulletWsUri = new Uri($"wss://{json.data.host_list[0].host}/sub");
+            bulletWsUri = new Uri(bulletDefaultUrl);
 
             #endregion
 
@@ -58,37 +62,11 @@ namespace BulletPlayer.Kits
             {
                 await _clientWebSocket.ConnectAsync(bulletWsUri, _cts.Token);
 
-
-                #region 认证包
-
-                var jsonIdentify = JsonConvert.SerializeObject(new
-                {
-                    uid = 0,
-                    roomid = roomId,
-                    protover = 2,
-                    platform = "web",
-                    clientver = "1.7.3",
-                    type = "1",
-                    key = token,
-                });
-                byte[] body = Encoding.UTF8.GetBytes(jsonIdentify);
-
-                WebSocketHeader webSocketHeader = new WebSocketHeader(16 + body.Length, 16, 1, 7, 1);
-
-
-                byte[] header = webSocketHeader.GetHeaderConcat();
-
-                byte[] stream = header.Concat(body).ToArray();
-
-                await _clientWebSocket.SendAsync(new ArraySegment<byte>(stream), WebSocketMessageType.Binary, true, _cts.Token);
-                #endregion
-
                 #region 接收包
 
                 await Task.Factory.StartNew(
                     async () =>
                     {
-                        var receiveBytes = new byte[128];
                         var receiveBuffer = new byte[8192 * 1024];
 
                         WebSocketReceiveResult receiveResult;
@@ -99,7 +77,7 @@ namespace BulletPlayer.Kits
 
                             do
                             {
-                                receiveResult = await _clientWebSocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer,receiveOffset,receiveBuffer.Length - receiveOffset), _cts.Token);
+                                receiveResult = await _clientWebSocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer, receiveOffset, receiveBuffer.Length - receiveOffset), _cts.Token);
                                 receiveOffset += receiveResult.Count;
 
                             } while (!receiveResult.EndOfMessage);
@@ -110,16 +88,45 @@ namespace BulletPlayer.Kits
 
                 #endregion
 
+                #region 认证包
+
+                var jsonIdentify = JsonConvert.SerializeObject(new
+                {
+                    uid = 293793435,
+                    roomid = roomId,
+                    protover = 2,
+                    platform = "web",
+                    clientver = "1.10.3",
+                    type = "2",
+                    key = token,
+                });
+
+                byte[] body = Encoding.UTF8.GetBytes(jsonIdentify);
+
+                WebSocketHeader webSocketHeader = new WebSocketHeader(16 + body.Length, 16, 1, 7, 1);
+
+                byte[] header = webSocketHeader.GetHeaderConcat();
+
+                byte[] stream = header.Concat(body).ToArray();
+
+                await _clientWebSocket.SendAsync(new ArraySegment<byte>(stream), WebSocketMessageType.Binary, true, _cts.Token);
+                #endregion
+
                 #region 心跳包
 
                 while (!_cts.IsCancellationRequested)
                 {
+                    byte[] heartBodyBytes = Encoding.UTF8.GetBytes("[object object]");
 
-                    var message = Console.ReadLine();
-                    byte[] sendBytes = Encoding.UTF8.GetBytes(message);
-                    var sendBuffer = new ArraySegment<byte>(sendBytes);
-                    await _clientWebSocket.SendAsync(sendBuffer, WebSocketMessageType.Text, endOfMessage: true,
+                    var webSocketHeartHeader = new WebSocketHeader(16 + heartBodyBytes.Length, 16, 1, 2, 1);
+
+                    byte[] heartHeader = webSocketHeartHeader.GetHeaderConcat();
+                    byte[] heartStream = heartHeader.Concat(heartBodyBytes).ToArray();
+
+                    await _clientWebSocket.SendAsync(new ArraySegment<byte>(heartStream), WebSocketMessageType.Binary, endOfMessage: true,
                         _cts.Token);
+
+                    await Task.Delay(heartInterval, _cts.Token);
                 }
 
                 #endregion
@@ -132,6 +139,42 @@ namespace BulletPlayer.Kits
 
         private void BulletParse(byte[] receiveBuffer)
         {
+            byte[] header = new byte[16];
+
+            Array.Copy(receiveBuffer, 0, header, 0, 16);
+            var webSocketHeader = new WebSocketHeader(header);
+
+            if (webSocketHeader.packageSize < 16)
+            {
+                return;
+            }
+
+            byte[] bufferBytes = receiveBuffer.Skip(16).Take(webSocketHeader.packageSize - 16).ToArray();
+
+            string bufferString = Encoding.UTF8.GetString(bufferBytes);
+            dynamic obj = JsonConvert.DeserializeObject<dynamic>(bufferString);
+
+            switch (webSocketHeader.operation)
+            {
+
+                case 3:     //心跳包回复(人气值)
+                    var popularity = BitConverter.ToInt32(bufferBytes.Reverse().ToArray(), 0);
+
+                    Console.WriteLine($"人气值:{popularity}");
+
+                    break;
+                case 5:     //普通包(命令)
+
+                    break;
+                case 8:     //认证包回复
+                    if (obj.code == "0")
+                    {
+                        Console.WriteLine("认证成功");
+                    }
+                    break;
+            }
+
+            
 
         }
     }
